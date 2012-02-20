@@ -19,7 +19,6 @@ package org.woltage.irssiconnectbot;
 
 import java.util.List;
 
-import com.bugsense.trace.BugSenseHandler;
 import org.woltage.irssiconnectbot.bean.HostBean;
 import org.woltage.irssiconnectbot.service.TerminalBridge;
 import org.woltage.irssiconnectbot.service.TerminalManager;
@@ -35,9 +34,9 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.Intent.ShortcutIconResource;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
-import android.content.Intent.ShortcutIconResource;
 import android.content.SharedPreferences.Editor;
 import android.content.res.ColorStateList;
 import android.net.Uri;
@@ -52,18 +51,19 @@ import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.view.View;
-import android.view.ViewGroup;
 import android.view.MenuItem.OnMenuItemClickListener;
+import android.view.View;
 import android.view.View.OnKeyListener;
+import android.view.ViewGroup;
 import android.widget.AdapterView;
+import android.widget.AdapterView.OnItemClickListener;
 import android.widget.ArrayAdapter;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.AdapterView.OnItemClickListener;
 
+import com.bugsense.trace.BugSenseHandler;
 import com.nullwire.trace.ExceptionHandler;
 
 public class HostListActivity extends ListActivity {
@@ -344,7 +344,17 @@ public class HostListActivity extends ListActivity {
 			}
 		});
 
-		MenuItem edit = menu.add(R.string.list_host_edit);
+        MenuItem pubkey = menu.add(R.string.list_host_pubkey);
+        pubkey.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+            public boolean onMenuItemClick(MenuItem item) {
+                Intent intent = new Intent(HostListActivity.this, SetupPubkeyActivity.class);
+                intent.putExtra(Intent.EXTRA_TITLE, host.getId());
+                HostListActivity.this.startActivityForResult(intent, REQUEST_EDIT);
+                return true;
+            }
+        });
+
+        MenuItem edit = menu.add(R.string.list_host_edit);
 		edit.setOnMenuItemClickListener(new OnMenuItemClickListener() {
 			public boolean onMenuItemClick(MenuItem item) {
 				Intent intent = new Intent(HostListActivity.this, HostEditorActivity.class);
