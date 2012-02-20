@@ -43,9 +43,9 @@ import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.DialogInterface.OnClickListener;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.content.DialogInterface.OnClickListener;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -58,17 +58,17 @@ import android.view.ContextMenu;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MenuItem.OnMenuItemClickListener;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.MenuItem.OnMenuItemClickListener;
 import android.widget.AdapterView;
+import android.widget.AdapterView.OnItemClickListener;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TableRow;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.AdapterView.OnItemClickListener;
 
 import com.trilead.ssh2.crypto.Base64;
 import com.trilead.ssh2.crypto.PEMDecoder;
@@ -83,12 +83,16 @@ import com.trilead.ssh2.crypto.PEMStructure;
 public class PubkeyListActivity extends ListActivity implements EventListener {
 	public final static String TAG = "ConnectBot.PubkeyListActivity";
 
+	public static final String PICK_MODE = "pickmode";
+
 	private static final int MAX_KEYFILE_SIZE = 8192;
 	private static final int REQUEST_CODE_PICK_FILE = 1;
 
 	// Constants for AndExplorer's file picking intent
 	private static final String ANDEXPLORER_TITLE = "explorer_title";
 	private static final String MIME_TYPE_ANDEXPLORER_FILE = "vnd.android.cursor.dir/lysesoft.andexplorer.file";
+
+    public static final String PICKED_PUBKEY_ID = "pubkey_id";
 
 	protected PubkeyDatabase pubkeydb;
 	private List<PubkeyBean> pubkeys;
@@ -154,6 +158,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 		registerForContextMenu(getListView());
 
+		final boolean pickMode = getIntent().getBooleanExtra( PICK_MODE, false );
+
 		getListView().setOnItemClickListener(new OnItemClickListener() {
 			public void onItemClick(AdapterView<?> adapter, View view, int position, long id) {
 				PubkeyBean pubkey = (PubkeyBean) getListView().getItemAtPosition(position);
@@ -161,8 +167,15 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 				// handle toggling key in-memory on/off
 				if(loaded) {
-					bound.removeKey(pubkey.getNickname());
-					updateHandler.sendEmptyMessage(-1);
+				    if( pickMode ) {
+				        Intent intent = new Intent();
+				        intent.putExtra( PICKED_PUBKEY_ID, pubkey.getId() );
+				        setResult(RESULT_OK, intent);
+				        finish();
+				    } else {
+    					bound.removeKey(pubkey.getNickname());
+    					updateHandler.sendEmptyMessage(-1);
+				    }
 				} else {
 					handleAddKey(pubkey);
 				}
