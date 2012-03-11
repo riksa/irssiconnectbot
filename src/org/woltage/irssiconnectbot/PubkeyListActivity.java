@@ -92,7 +92,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 	private static final String ANDEXPLORER_TITLE = "explorer_title";
 	private static final String MIME_TYPE_ANDEXPLORER_FILE = "vnd.android.cursor.dir/lysesoft.andexplorer.file";
 
-    public static final String PICKED_PUBKEY_ID = "pubkey_id";
+	public static final String PICKED_PUBKEY_ID = "pubkey_id";
 
 	protected PubkeyDatabase pubkeydb;
 	private List<PubkeyBean> pubkeys;
@@ -126,7 +126,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 		bindService(new Intent(this, TerminalManager.class), connection, Context.BIND_AUTO_CREATE);
 
-		if(pubkeydb == null)
+		if (pubkeydb == null)
 			pubkeydb = new PubkeyDatabase(this);
 	}
 
@@ -136,7 +136,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 		unbindService(connection);
 
-		if(pubkeydb != null) {
+		if (pubkeydb != null) {
 			pubkeydb.close();
 			pubkeydb = null;
 		}
@@ -147,8 +147,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 		super.onCreate(icicle);
 		setContentView(R.layout.act_pubkeylist);
 
-		this.setTitle(String.format("%s: %s",
-				getResources().getText(R.string.app_name),
+		this.setTitle(String.format("%s: %s", getResources().getText(R.string.app_name),
 				getResources().getText(R.string.title_pubkey_list)));
 
 		// connect with hosts database and populate list
@@ -158,7 +157,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 		registerForContextMenu(getListView());
 
-		final boolean pickMode = getIntent().getBooleanExtra( PICK_MODE, false );
+		final boolean pickMode = getIntent().getBooleanExtra(PICK_MODE, false);
 
 		getListView().setOnItemClickListener(new OnItemClickListener() {
 			public void onItemClick(AdapterView<?> adapter, View view, int position, long id) {
@@ -166,16 +165,16 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 				boolean loaded = bound.isKeyLoaded(pubkey.getNickname());
 
 				// handle toggling key in-memory on/off
-				if(loaded) {
-				    if( pickMode ) {
-				        Intent intent = new Intent();
-				        intent.putExtra( PICKED_PUBKEY_ID, pubkey.getId() );
-				        setResult(RESULT_OK, intent);
-				        finish();
-				    } else {
-    					bound.removeKey(pubkey.getNickname());
-    					updateHandler.sendEmptyMessage(-1);
-				    }
+				if (loaded) {
+					if (pickMode) {
+						Intent intent = new Intent();
+						intent.putExtra(PICKED_PUBKEY_ID, pubkey.getId());
+						setResult(RESULT_OK, intent);
+						finish();
+					} else {
+						bound.removeKey(pubkey.getNickname());
+						updateHandler.sendEmptyMessage(-1);
+					}
 				} else {
 					handleAddKey(pubkey);
 				}
@@ -183,7 +182,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 			}
 		});
 
-		clipboard = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+		clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
 
 		inflater = LayoutInflater.from(this);
 	}
@@ -228,7 +227,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 				Intent intent = new Intent(FileManagerIntents.ACTION_PICK_FILE);
 				intent.setData(sdcard);
 				intent.putExtra(FileManagerIntents.EXTRA_TITLE, pickerTitle);
-				intent.putExtra(FileManagerIntents.EXTRA_BUTTON_TEXT, getString(android.R.string.ok));
+				intent.putExtra(FileManagerIntents.EXTRA_BUTTON_TEXT,
+						getString(android.R.string.ok));
 
 				try {
 					startActivityForResult(intent, REQUEST_CODE_PICK_FILE);
@@ -255,16 +255,16 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 	protected void handleAddKey(final PubkeyBean pubkey) {
 		if (pubkey.isEncrypted()) {
 			final View view = inflater.inflate(R.layout.dia_password, null);
-			final EditText passwordField = (EditText)view.findViewById(android.R.id.text1);
+			final EditText passwordField = (EditText) view.findViewById(android.R.id.text1);
 
 			new AlertDialog.Builder(PubkeyListActivity.this)
-				.setView(view)
-				.setPositiveButton(R.string.pubkey_unlock, new DialogInterface.OnClickListener() {
-					public void onClick(DialogInterface dialog, int which) {
-						handleAddKey(pubkey, passwordField.getText().toString());
-					}
-				})
-				.setNegativeButton(android.R.string.cancel, null).create().show();
+					.setView(view)
+					.setPositiveButton(R.string.pubkey_unlock,
+							new DialogInterface.OnClickListener() {
+								public void onClick(DialogInterface dialog, int which) {
+									handleAddKey(pubkey, passwordField.getText().toString());
+								}
+							}).setNegativeButton(android.R.string.cancel, null).create().show();
 		} else {
 			handleAddKey(pubkey, null);
 		}
@@ -272,12 +272,14 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 	protected void handleAddKey(PubkeyBean pubkey, String password) {
 		Object trileadKey = null;
-		if(PubkeyDatabase.KEY_TYPE_IMPORTED.equals(pubkey.getType())) {
+		if (PubkeyDatabase.KEY_TYPE_IMPORTED.equals(pubkey.getType())) {
 			// load specific key using pem format
 			try {
-				trileadKey = PEMDecoder.decode(new String(pubkey.getPrivateKey()).toCharArray(), password);
-			} catch(Exception e) {
-				String message = getResources().getString(R.string.pubkey_failed_add, pubkey.getNickname());
+				trileadKey = PEMDecoder.decode(new String(pubkey.getPrivateKey()).toCharArray(),
+						password);
+			} catch (Exception e) {
+				String message = getResources().getString(R.string.pubkey_failed_add,
+						pubkey.getNickname());
 				Log.e(TAG, message, e);
 				Toast.makeText(PubkeyListActivity.this, message, Toast.LENGTH_LONG);
 			}
@@ -287,10 +289,12 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 			PrivateKey privKey = null;
 			PublicKey pubKey = null;
 			try {
-				privKey = PubkeyUtils.decodePrivate(pubkey.getPrivateKey(), pubkey.getType(), password);
+				privKey = PubkeyUtils.decodePrivate(pubkey.getPrivateKey(), pubkey.getType(),
+						password);
 				pubKey = PubkeyUtils.decodePublic(pubkey.getPublicKey(), pubkey.getType());
 			} catch (Exception e) {
-				String message = getResources().getString(R.string.pubkey_failed_add, pubkey.getNickname());
+				String message = getResources().getString(R.string.pubkey_failed_add,
+						pubkey.getNickname());
 				Log.e(TAG, message, e);
 				Toast.makeText(PubkeyListActivity.this, message, Toast.LENGTH_LONG);
 				return;
@@ -301,7 +305,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 			Log.d(TAG, "Unlocked key " + PubkeyUtils.formatKey(pubKey));
 		}
 
-		if(trileadKey == null) return;
+		if (trileadKey == null)
+			return;
 
 		Log.d(TAG, String.format("Unlocked key '%s'", pubkey.getNickname()));
 
@@ -326,15 +331,16 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 		final boolean imported = PubkeyDatabase.KEY_TYPE_IMPORTED.equals(pubkey.getType());
 		final boolean loaded = bound.isKeyLoaded(pubkey.getNickname());
 
-		MenuItem load = menu.add(loaded ? R.string.pubkey_memory_unload : R.string.pubkey_memory_load);
+		MenuItem load = menu.add(loaded ? R.string.pubkey_memory_unload
+				: R.string.pubkey_memory_load);
 		load.setOnMenuItemClickListener(new OnMenuItemClickListener() {
 			public boolean onMenuItemClick(MenuItem item) {
-				if(loaded) {
+				if (loaded) {
 					bound.removeKey(pubkey.getNickname());
 					updateHandler.sendEmptyMessage(-1);
 				} else {
 					handleAddKey(pubkey);
-					//bound.addKey(nickname, trileadKey);
+					// bound.addKey(nickname, trileadKey);
 				}
 				return true;
 			}
@@ -360,7 +366,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 			public boolean onMenuItemClick(MenuItem item) {
 				try {
 					PublicKey pk = PubkeyUtils.decodePublic(pubkey.getPublicKey(), pubkey.getType());
-					String openSSHPubkey = PubkeyUtils.convertToOpenSSHFormat(pk, pubkey.getNickname());
+					String openSSHPubkey = PubkeyUtils.convertToOpenSSHFormat(pk,
+							pubkey.getNickname());
 
 					clipboard.setText(openSSHPubkey);
 				} catch (Exception e) {
@@ -380,7 +387,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 					if (imported)
 						data = new String(pubkey.getPrivateKey());
 					else {
-						PrivateKey pk = PubkeyUtils.decodePrivate(pubkey.getPrivateKey(), pubkey.getType());
+						PrivateKey pk = PubkeyUtils.decodePrivate(pubkey.getPrivateKey(),
+								pubkey.getType());
 						data = PubkeyUtils.exportPEM(pk, null);
 					}
 
@@ -396,47 +404,54 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 		changePassword.setEnabled(!imported);
 		changePassword.setOnMenuItemClickListener(new OnMenuItemClickListener() {
 			public boolean onMenuItemClick(MenuItem item) {
-				final View changePasswordView = inflater.inflate(R.layout.dia_changepassword, null, false);
-				((TableRow)changePasswordView.findViewById(R.id.old_password_prompt))
-					.setVisibility(pubkey.isEncrypted() ? View.VISIBLE : View.GONE);
+				final View changePasswordView = inflater.inflate(R.layout.dia_changepassword, null,
+						false);
+				((TableRow) changePasswordView.findViewById(R.id.old_password_prompt))
+						.setVisibility(pubkey.isEncrypted() ? View.VISIBLE : View.GONE);
 				new AlertDialog.Builder(PubkeyListActivity.this)
-					.setView(changePasswordView)
-					.setPositiveButton(R.string.button_change, new DialogInterface.OnClickListener() {
-						public void onClick(DialogInterface dialog, int which) {
-							String oldPassword = ((EditText)changePasswordView.findViewById(R.id.old_password)).getText().toString();
-							String password1 = ((EditText)changePasswordView.findViewById(R.id.password1)).getText().toString();
-							String password2 = ((EditText)changePasswordView.findViewById(R.id.password2)).getText().toString();
+						.setView(changePasswordView)
+						.setPositiveButton(R.string.button_change,
+								new DialogInterface.OnClickListener() {
+									public void onClick(DialogInterface dialog, int which) {
+										String oldPassword = ((EditText) changePasswordView
+												.findViewById(R.id.old_password)).getText()
+												.toString();
+										String password1 = ((EditText) changePasswordView
+												.findViewById(R.id.password1)).getText().toString();
+										String password2 = ((EditText) changePasswordView
+												.findViewById(R.id.password2)).getText().toString();
 
-							if (!password1.equals(password2)) {
-								new AlertDialog.Builder(PubkeyListActivity.this)
-									.setMessage(R.string.alert_passwords_do_not_match_msg)
-									.setPositiveButton(android.R.string.ok, null)
-									.create().show();
-								return;
-							}
+										if (!password1.equals(password2)) {
+											new AlertDialog.Builder(PubkeyListActivity.this)
+													.setMessage(
+															R.string.alert_passwords_do_not_match_msg)
+													.setPositiveButton(android.R.string.ok, null)
+													.create().show();
+											return;
+										}
 
-							try {
-								if (!pubkey.changePassword(oldPassword, password1))
-									new AlertDialog.Builder(PubkeyListActivity.this)
-										.setMessage(R.string.alert_wrong_password_msg)
-										.setPositiveButton(android.R.string.ok, null)
-										.create().show();
-								else {
-									pubkeydb.savePubkey(pubkey);
-									updateHandler.sendEmptyMessage(-1);
-								}
-							} catch (Exception e) {
-								Log.e(TAG, "Could not change private key password", e);
-								new AlertDialog.Builder(PubkeyListActivity.this)
-									.setMessage(R.string.alert_key_corrupted_msg)
-									.setPositiveButton(android.R.string.ok, null)
-									.create().show();
-							}
-						}
-					})
-					.setNegativeButton(android.R.string.cancel, null).create().show();
+										try {
+											if (!pubkey.changePassword(oldPassword, password1))
+												new AlertDialog.Builder(PubkeyListActivity.this)
+														.setMessage(
+																R.string.alert_wrong_password_msg)
+														.setPositiveButton(android.R.string.ok,
+																null).create().show();
+											else {
+												pubkeydb.savePubkey(pubkey);
+												updateHandler.sendEmptyMessage(-1);
+											}
+										} catch (Exception e) {
+											Log.e(TAG, "Could not change private key password", e);
+											new AlertDialog.Builder(PubkeyListActivity.this)
+													.setMessage(R.string.alert_key_corrupted_msg)
+													.setPositiveButton(android.R.string.ok, null)
+													.create().show();
+										}
+									}
+								}).setNegativeButton(android.R.string.cancel, null).create().show();
 
-			return true;
+				return true;
 			}
 		});
 
@@ -458,27 +473,26 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 			public boolean onMenuItemClick(MenuItem item) {
 				// prompt user to make sure they really want this
 				new AlertDialog.Builder(PubkeyListActivity.this)
-					.setMessage(getString(R.string.delete_message, pubkey.getNickname()))
-					.setPositiveButton(R.string.delete_pos, new DialogInterface.OnClickListener() {
-						public void onClick(DialogInterface dialog, int which) {
+						.setMessage(getString(R.string.delete_message, pubkey.getNickname()))
+						.setPositiveButton(R.string.delete_pos,
+								new DialogInterface.OnClickListener() {
+									public void onClick(DialogInterface dialog, int which) {
 
-							// dont forget to remove from in-memory
-							if(loaded)
-								bound.removeKey(pubkey.getNickname());
+										// dont forget to remove from in-memory
+										if (loaded)
+											bound.removeKey(pubkey.getNickname());
 
-							// delete from backend database and update gui
-							pubkeydb.deletePubkey(pubkey);
-							updateHandler.sendEmptyMessage(-1);
-						}
-					})
-					.setNegativeButton(R.string.delete_neg, null).create().show();
+										// delete from backend database and update gui
+										pubkeydb.deletePubkey(pubkey);
+										updateHandler.sendEmptyMessage(-1);
+									}
+								}).setNegativeButton(R.string.delete_neg, null).create().show();
 
 				return true;
 			}
 		});
 
 	}
-
 
 	protected Handler updateHandler = new Handler() {
 		@Override
@@ -488,7 +502,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 	};
 
 	protected void updateList() {
-		if (pubkeydb == null) return;
+		if (pubkeydb == null)
+			return;
 
 		pubkeys = pubkeydb.allPubkeys();
 		PubkeyAdapter adapter = new PubkeyAdapter(this, pubkeys);
@@ -530,8 +545,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 		pubkey.setNickname(file.getName());
 
 		if (file.length() > MAX_KEYFILE_SIZE) {
-			Toast.makeText(PubkeyListActivity.this,
-					R.string.pubkey_import_parse_problem,
+			Toast.makeText(PubkeyListActivity.this, R.string.pubkey_import_parse_problem,
 					Toast.LENGTH_LONG).show();
 			return;
 		}
@@ -543,7 +557,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 			String data = new String(raw);
 			if (data.startsWith(PubkeyUtils.PKCS8_START)) {
-				int start = data.indexOf(PubkeyUtils.PKCS8_START) + PubkeyUtils.PKCS8_START.length();
+				int start = data.indexOf(PubkeyUtils.PKCS8_START)
+						+ PubkeyUtils.PKCS8_START.length();
 				int end = data.indexOf(PubkeyUtils.PKCS8_END);
 
 				if (end > start) {
@@ -558,8 +573,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 					pubkey.setPublicKey(kp.getPublic().getEncoded());
 				} else {
 					Log.e(TAG, "Problem parsing PKCS#8 file; corrupt?");
-					Toast.makeText(PubkeyListActivity.this,
-							R.string.pubkey_import_parse_problem,
+					Toast.makeText(PubkeyListActivity.this, R.string.pubkey_import_parse_problem,
 							Toast.LENGTH_LONG).show();
 				}
 			} else {
@@ -575,15 +589,16 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 			pubkeydb.savePubkey(pubkey);
 
 			updateHandler.sendEmptyMessage(-1);
-		} catch(Exception e) {
+		} catch (Exception e) {
 			Log.e(TAG, "Problem parsing imported private key", e);
-			Toast.makeText(PubkeyListActivity.this, R.string.pubkey_import_parse_problem, Toast.LENGTH_LONG).show();
+			Toast.makeText(PubkeyListActivity.this, R.string.pubkey_import_parse_problem,
+					Toast.LENGTH_LONG).show();
 		}
 	}
 
 	/**
-	 *
-	 */
+     *
+     */
 	private void pickFileSimple() {
 		// build list of all files in sdcard root
 		final File sdcard = Environment.getExternalStorageDirectory();
@@ -594,8 +609,8 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 		if (!Environment.MEDIA_MOUNTED_READ_ONLY.equals(state)
 				&& !Environment.MEDIA_MOUNTED.equals(state)) {
 			new AlertDialog.Builder(PubkeyListActivity.this)
-				.setMessage(R.string.alert_sdcard_absent)
-				.setNegativeButton(android.R.string.cancel, null).create().show();
+					.setMessage(R.string.alert_sdcard_absent)
+					.setNegativeButton(android.R.string.cancel, null).create().show();
 			return;
 		}
 
@@ -603,8 +618,9 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 		{
 			File[] files = sdcard.listFiles();
 			if (files != null) {
-				for(File file : sdcard.listFiles()) {
-					if(file.isDirectory()) continue;
+				for (File file : sdcard.listFiles()) {
+					if (file.isDirectory())
+						continue;
 					names.add(file.getName());
 				}
 			}
@@ -615,16 +631,14 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 		Log.d(TAG, names.toString());
 
 		// prompt user to select any file from the sdcard root
-		new AlertDialog.Builder(PubkeyListActivity.this)
-			.setTitle(R.string.pubkey_list_pick)
-			.setItems(namesList, new OnClickListener() {
-				public void onClick(DialogInterface arg0, int arg1) {
-					String name = namesList[arg1];
+		new AlertDialog.Builder(PubkeyListActivity.this).setTitle(R.string.pubkey_list_pick)
+				.setItems(namesList, new OnClickListener() {
+					public void onClick(DialogInterface arg0, int arg1) {
+						String name = namesList[arg1];
 
-					readKeyFromFile(new File(sdcard, name));
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null).create().show();
+						readKeyFromFile(new File(sdcard, name));
+					}
+				}).setNegativeButton(android.R.string.cancel, null).create().show();
 	}
 
 	class PubkeyAdapter extends ArrayAdapter<PubkeyBean> {
@@ -666,15 +680,18 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 
 			if (imported) {
 				try {
-					PEMStructure struct = PEMDecoder.parsePEM(new String(pubkey.getPrivateKey()).toCharArray());
-					String type = (struct.pemType == PEMDecoder.PEM_RSA_PRIVATE_KEY) ? "RSA" : "DSA";
+					PEMStructure struct = PEMDecoder.parsePEM(new String(pubkey.getPrivateKey())
+							.toCharArray());
+					String type = (struct.pemType == PEMDecoder.PEM_RSA_PRIVATE_KEY) ? "RSA"
+							: "DSA";
 					holder.caption.setText(String.format("%s unknown-bit", type));
 				} catch (IOException e) {
 					Log.e(TAG, "Error decoding IMPORTED public key at " + pubkey.getId(), e);
 				}
 			} else {
 				try {
-					PublicKey pub = PubkeyUtils.decodePublic(pubkey.getPublicKey(), pubkey.getType());
+					PublicKey pub = PubkeyUtils.decodePublic(pubkey.getPublicKey(),
+							pubkey.getType());
 					holder.caption.setText(PubkeyUtils.describeKey(pub, pubkey.isEncrypted()));
 				} catch (Exception e) {
 					Log.e(TAG, "Error decoding public key at " + pubkey.getId(), e);
@@ -690,7 +707,7 @@ public class PubkeyListActivity extends ListActivity implements EventListener {
 				if (bound.isKeyLoaded(pubkey.getNickname()))
 					holder.icon.setImageState(new int[] { android.R.attr.state_checked }, true);
 				else
-					holder.icon.setImageState(new int[] {  }, true);
+					holder.icon.setImageState(new int[] {}, true);
 			}
 
 			return convertView;

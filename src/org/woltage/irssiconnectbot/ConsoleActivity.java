@@ -84,1032 +84,1032 @@ import com.nullwire.trace.ExceptionHandler;
 import de.mud.terminal.vt320;
 
 public class ConsoleActivity extends Activity {
-    public final static String TAG = "ConnectBot.ConsoleActivity";
+	public final static String TAG = "ConnectBot.ConsoleActivity";
 
-    protected static final int REQUEST_EDIT = 1;
-    protected static final int REQUEST_SELECT = 2;
+	protected static final int REQUEST_EDIT = 1;
+	protected static final int REQUEST_SELECT = 2;
 
-    protected static final int CLICK_TIME = 400;
-    protected static final float MAX_CLICK_DISTANCE = 25f;
-    protected static final int KEYBOARD_DISPLAY_TIME = 1500;
+	protected static final int CLICK_TIME = 400;
+	protected static final float MAX_CLICK_DISTANCE = 25f;
+	protected static final int KEYBOARD_DISPLAY_TIME = 1500;
 
-    // Direction to shift the ViewFlipper
-    protected static final int SHIFT_LEFT = 0;
-    protected static final int SHIFT_RIGHT = 1;
+	// Direction to shift the ViewFlipper
+	protected static final int SHIFT_LEFT = 0;
+	protected static final int SHIFT_RIGHT = 1;
 
-    protected ViewFlipper flip = null;
-    protected TerminalManager bound = null;
-    protected LayoutInflater inflater = null;
+	protected ViewFlipper flip = null;
+	protected TerminalManager bound = null;
+	protected LayoutInflater inflater = null;
 
-    protected SharedPreferences prefs = null;
+	protected SharedPreferences prefs = null;
 
-    // determines whether or not menuitem accelerators are bound
-    // otherwise they collide with an external keyboard's CTRL-char
-    private boolean hardKeyboard = false;
+	// determines whether or not menuitem accelerators are bound
+	// otherwise they collide with an external keyboard's CTRL-char
+	private boolean hardKeyboard = false;
 
-    protected Uri requested;
+	protected Uri requested;
 
-    protected ClipboardManager clipboard;
-    private RelativeLayout stringPromptGroup;
-    protected EditText stringPrompt;
-    private TextView stringPromptInstructions;
+	protected ClipboardManager clipboard;
+	private RelativeLayout stringPromptGroup;
+	protected EditText stringPrompt;
+	private TextView stringPromptInstructions;
 
-    private RelativeLayout booleanPromptGroup;
-    private TextView booleanPrompt;
-    private Button booleanYes, booleanNo;
+	private RelativeLayout booleanPromptGroup;
+	private TextView booleanPrompt;
+	private Button booleanYes, booleanNo;
 
-    private TextView empty;
+	private TextView empty;
 
-    private Animation slide_left_in, slide_left_out, slide_right_in, slide_right_out,
-            fade_stay_hidden, fade_out_delayed;
+	private Animation slide_left_in, slide_left_out, slide_right_in, slide_right_out,
+			fade_stay_hidden, fade_out_delayed;
 
-    protected Animation keyboard_fade_in, keyboard_fade_out;
+	protected Animation keyboard_fade_in, keyboard_fade_out;
 
-    private InputMethodManager inputManager;
+	private InputMethodManager inputManager;
 
-    private MenuItem disconnect, copy, paste, portForward, resize, urlscan;
+	private MenuItem disconnect, copy, paste, portForward, resize, urlscan;
 
-    protected TerminalBridge copySource = null;
+	protected TerminalBridge copySource = null;
 
-    private boolean forcedOrientation;
+	private boolean forcedOrientation;
 
-    private ImageView mKeyboardButton;
-    private ImageView mInputButton;
+	private ImageView mKeyboardButton;
+	private ImageView mInputButton;
 
-    private ServiceConnection connection = new ServiceConnection() {
-        public void onServiceConnected(ComponentName className, IBinder service) {
-            bound = ((TerminalManager.TerminalBinder) service).getService();
+	private ServiceConnection connection = new ServiceConnection() {
+		public void onServiceConnected(ComponentName className, IBinder service) {
+			bound = ((TerminalManager.TerminalBinder) service).getService();
 
-            // let manager know about our event handling services
-            bound.disconnectHandler = disconnectHandler;
+			// let manager know about our event handling services
+			bound.disconnectHandler = disconnectHandler;
 
-            Log.d(TAG, String.format("Connected to TerminalManager and found bridges.size=%d",
-                    bound.bridges.size()));
-
-            bound.setResizeAllowed(true);
-
-            // clear out any existing bridges and record requested index
-            flip.removeAllViews();
-
-            final String requestedNickname = (requested != null) ? requested.getFragment() : null;
-            int requestedIndex = 0;
-
-            TerminalBridge requestedBridge = bound.getConnectedBridge(requestedNickname);
-
-            // If we didn't find the requested connection, try opening it
-            if (requestedNickname != null && requestedBridge == null) {
-                try {
-                    Log.d(TAG,
-                            String.format(
-                                    "We couldnt find an existing bridge with URI=%s (nickname=%s), so creating one now",
-                                    requested.toString(), requestedNickname));
-                    requestedBridge = bound.openConnection(requested);
-                } catch (Exception e) {
-                    Log.e(TAG, "Problem while trying to create new requested bridge from URI", e);
-                }
-            }
-
-            // create views for all bridges on this service
-            for (TerminalBridge bridge : bound.bridges) {
-
-                final int currentIndex = addNewTerminalView(bridge);
-
-                // check to see if this bridge was requested
-                if (bridge == requestedBridge)
-                    requestedIndex = currentIndex;
-            }
-
-            setDisplayedTerminal(requestedIndex);
-        }
-
-        public void onServiceDisconnected(ComponentName className) {
-            // tell each bridge to forget about our prompt handler
-            synchronized (bound.bridges) {
-                for (TerminalBridge bridge : bound.bridges)
-                    bridge.promptHelper.setHandler(null);
-            }
-
-            flip.removeAllViews();
-            updateEmptyVisible();
-            bound = null;
-        }
-    };
-
-    protected Handler promptHandler = new Handler() {
-        @Override
-        public void handleMessage(Message msg) {
-            // someone below us requested to display a prompt
-            updatePromptVisible();
-        }
-    };
-
-    protected Handler disconnectHandler = new Handler() {
-        @Override
-        public void handleMessage(Message msg) {
-            Log.d(TAG, "Someone sending HANDLE_DISCONNECT to parentHandler");
-
-            // someone below us requested to display a password dialog
-            // they are sending nickname and requested
-            TerminalBridge bridge = (TerminalBridge) msg.obj;
-
-            if (bridge.isAwaitingClose())
-                closeBridge(bridge);
-        }
-    };
-
-    /**
-     * @param bridge
-     */
-    private void closeBridge(final TerminalBridge bridge) {
-        synchronized (flip) {
-            final int flipIndex = getFlipIndex(bridge);
-
-            if (flipIndex >= 0) {
-                if (flip.getDisplayedChild() == flipIndex) {
-                    shiftCurrentTerminal(SHIFT_LEFT);
-                }
-                flip.removeViewAt(flipIndex);
-
-                /*
-                 * TODO Remove this workaround when ViewFlipper is fixed to listen to view removals.
-                 * Android Issue 1784
-                 */
-                final int numChildren = flip.getChildCount();
-                if (flip.getDisplayedChild() >= numChildren && numChildren > 0) {
-                    flip.setDisplayedChild(numChildren - 1);
-                }
-
-                updateEmptyVisible();
-            }
-
-            // If we just closed the last bridge, go back to the previous activity.
-            if (flip.getChildCount() == 0) {
-                finish();
-            }
-        }
-    }
-
-    protected View findCurrentView(int id) {
-        View view = flip.getCurrentView();
-        if (view == null)
-            return null;
-        return view.findViewById(id);
-    }
-
-    protected PromptHelper getCurrentPromptHelper() {
-        View view = findCurrentView(R.id.console_flip);
-        if (!(view instanceof TerminalView))
-            return null;
-        return ((TerminalView) view).bridge.promptHelper;
-    }
-
-    protected void hideAllPrompts() {
-        stringPromptGroup.setVisibility(View.GONE);
-        booleanPromptGroup.setVisibility(View.GONE);
-        // adjust screen size if it was changed during prompt input
-        View view = findCurrentView(R.id.console_flip);
-        if (!(view instanceof TerminalView))
-            return;
-        ((TerminalView) view).bridge.parentChanged((TerminalView) view);
-    }
-
-    // more like configureLaxMode -- enable network IO on UI thread
-    private void configureStrictMode() {
-        try {
-            Class.forName("android.os.StrictMode");
-            StrictModeSetup.run();
-        } catch (ClassNotFoundException e) {
-        }
-    }
-
-    @Override
-    public void onCreate(Bundle icicle) {
-        super.onCreate(icicle);
-        configureStrictMode();
-        hardKeyboard = getResources().getConfiguration().keyboard == Configuration.KEYBOARD_QWERTY;
-
-        hardKeyboard = hardKeyboard && !Build.MODEL.startsWith("Transformer");
-
-        this.setContentView(R.layout.act_console);
-        BugSenseHandler.setup(this, "d27a12dc");
-        ExceptionHandler.register(this);
-
-        clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        prefs = PreferenceManager.getDefaultSharedPreferences(this);
-
-        // hide action bar if requested by user
-        try {
-            ActionBar actionBar = getActionBar();
-            if (!prefs.getBoolean(PreferenceConstants.ACTIONBAR, true)) {
-                actionBar.hide();
-            }
-        } catch (NoSuchMethodError error) {
-            Log.w(TAG, "Android sdk version pre 11.	Not touching ActionBar.");
-        }
-
-        // hide status bar if requested by user
-        if (prefs.getBoolean(PreferenceConstants.FULLSCREEN, false)) {
-            getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                    WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        }
-
-        // TODO find proper way to disable volume key beep if it exists.
-        setVolumeControlStream(AudioManager.STREAM_MUSIC);
-
-        // handle requested console from incoming intent
-        requested = getIntent().getData();
-
-        inflater = LayoutInflater.from(this);
-
-        flip = (ViewFlipper) findViewById(R.id.console_flip);
-        empty = (TextView) findViewById(android.R.id.empty);
-
-        stringPromptGroup = (RelativeLayout) findViewById(R.id.console_password_group);
-        stringPromptInstructions = (TextView) findViewById(R.id.console_password_instructions);
-        stringPrompt = (EditText) findViewById(R.id.console_password);
-        stringPrompt.setOnKeyListener(new OnKeyListener() {
-            public boolean onKey(View v, int keyCode, KeyEvent event) {
-                if (event.getAction() == KeyEvent.ACTION_UP)
-                    return false;
-                if (keyCode != KeyEvent.KEYCODE_ENTER)
-                    return false;
-
-                // pass collected password down to current terminal
-                String value = stringPrompt.getText().toString();
-
-                PromptHelper helper = getCurrentPromptHelper();
-                if (helper == null)
-                    return false;
-                helper.setResponse(value);
-
-                // finally clear password for next user
-                stringPrompt.setText("");
-                updatePromptVisible();
-
-                return true;
-            }
-        });
-
-        booleanPromptGroup = (RelativeLayout) findViewById(R.id.console_boolean_group);
-        booleanPrompt = (TextView) findViewById(R.id.console_prompt);
-
-        booleanYes = (Button) findViewById(R.id.console_prompt_yes);
-        booleanYes.setOnClickListener(new OnClickListener() {
-            public void onClick(View v) {
-                PromptHelper helper = getCurrentPromptHelper();
-                if (helper == null)
-                    return;
-                helper.setResponse(Boolean.TRUE);
-                updatePromptVisible();
-            }
-        });
-
-        booleanNo = (Button) findViewById(R.id.console_prompt_no);
-        booleanNo.setOnClickListener(new OnClickListener() {
-            public void onClick(View v) {
-                PromptHelper helper = getCurrentPromptHelper();
-                if (helper == null)
-                    return;
-                helper.setResponse(Boolean.FALSE);
-                updatePromptVisible();
-            }
-        });
-
-        // preload animations for terminal switching
-        slide_left_in = AnimationUtils.loadAnimation(this, R.anim.slide_left_in);
-        slide_left_out = AnimationUtils.loadAnimation(this, R.anim.slide_left_out);
-        slide_right_in = AnimationUtils.loadAnimation(this, R.anim.slide_right_in);
-        slide_right_out = AnimationUtils.loadAnimation(this, R.anim.slide_right_out);
-
-        fade_out_delayed = AnimationUtils.loadAnimation(this, R.anim.fade_out_delayed);
-        fade_stay_hidden = AnimationUtils.loadAnimation(this, R.anim.fade_stay_hidden);
-
-        // Preload animation for keyboard button
-        keyboard_fade_in = AnimationUtils.loadAnimation(this, R.anim.keyboard_fade_in);
-        keyboard_fade_out = AnimationUtils.loadAnimation(this, R.anim.keyboard_fade_out);
-
-        inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-
-        final RelativeLayout keyboardGroup = (RelativeLayout) findViewById(R.id.keyboard_group);
-
-        mKeyboardButton = (ImageView) findViewById(R.id.button_keyboard);
-        mKeyboardButton.setOnClickListener(new OnClickListener() {
-            public void onClick(View view) {
-                View flip = findCurrentView(R.id.console_flip);
-                if (flip == null)
-                    return;
-
-                inputManager.showSoftInput(flip, InputMethodManager.SHOW_FORCED);
-                keyboardGroup.setVisibility(View.GONE);
-            }
-        });
-
-        final ImageView symButton = (ImageView) findViewById(R.id.button_sym);
-        symButton.setOnClickListener(new OnClickListener() {
-            public void onClick(View view) {
-                View flip = findCurrentView(R.id.console_flip);
-                if (flip == null)
-                    return;
-
-                TerminalView terminal = (TerminalView) flip;
-
-                TerminalKeyListener handler = terminal.bridge.getKeyHandler();
-                handler.showCharPickerDialog(terminal);
-                keyboardGroup.setVisibility(View.GONE);
-            }
-        });
-
-        mInputButton = (ImageView) findViewById(R.id.button_input);
-        mInputButton.setOnClickListener(new OnClickListener() {
-            public void onClick(View view) {
-                View flip = findCurrentView(R.id.console_flip);
-                if (flip == null)
-                    return;
-
-                final TerminalView terminal = (TerminalView) flip;
-                Thread promptThread = new Thread(new Runnable() {
-                    public void run() {
-                        String inj = getCurrentPromptHelper().requestStringPrompt(null, "");
-                        terminal.bridge.injectString(inj);
-                    }
-                });
-                promptThread.setName("Prompt");
-                promptThread.setDaemon(true);
-                promptThread.start();
-
-                keyboardGroup.setVisibility(View.GONE);
-            }
-        });
-
-        final ImageView ctrlButton = (ImageView) findViewById(R.id.button_ctrl);
-        ctrlButton.setOnClickListener(new OnClickListener() {
-            public void onClick(View view) {
-                View flip = findCurrentView(R.id.console_flip);
-                if (flip == null)
-                    return;
-                TerminalView terminal = (TerminalView) flip;
-
-                TerminalKeyListener handler = terminal.bridge.getKeyHandler();
-                handler.metaPress(TerminalKeyListener.META_CTRL_ON);
-                terminal.bridge.tryKeyVibrate();
-
-                keyboardGroup.setVisibility(View.GONE);
-            }
-        });
-
-        final ImageView escButton = (ImageView) findViewById(R.id.button_esc);
-        escButton.setOnClickListener(new OnClickListener() {
-            public void onClick(View view) {
-                View flip = findCurrentView(R.id.console_flip);
-                if (flip == null)
-                    return;
-                TerminalView terminal = (TerminalView) flip;
-
-                TerminalKeyListener handler = terminal.bridge.getKeyHandler();
-                handler.sendEscape();
-                terminal.bridge.tryKeyVibrate();
-                keyboardGroup.setVisibility(View.GONE);
-            }
-        });
-
-        // detect fling gestures to switch between terminals
-        final GestureDetector detect = new GestureDetector(new ICBSimpleOnGestureListener(this));
-
-        flip.setLongClickable(true);
-        flip.setOnTouchListener(new ICBOnTouchListener(this, keyboardGroup, detect));
-
-    }
-
-    /**
-	 *
+			Log.d(TAG, String.format("Connected to TerminalManager and found bridges.size=%d",
+					bound.bridges.size()));
+
+			bound.setResizeAllowed(true);
+
+			// clear out any existing bridges and record requested index
+			flip.removeAllViews();
+
+			final String requestedNickname = (requested != null) ? requested.getFragment() : null;
+			int requestedIndex = 0;
+
+			TerminalBridge requestedBridge = bound.getConnectedBridge(requestedNickname);
+
+			// If we didn't find the requested connection, try opening it
+			if (requestedNickname != null && requestedBridge == null) {
+				try {
+					Log.d(TAG,
+							String.format(
+									"We couldnt find an existing bridge with URI=%s (nickname=%s), so creating one now",
+									requested.toString(), requestedNickname));
+					requestedBridge = bound.openConnection(requested);
+				} catch (Exception e) {
+					Log.e(TAG, "Problem while trying to create new requested bridge from URI", e);
+				}
+			}
+
+			// create views for all bridges on this service
+			for (TerminalBridge bridge : bound.bridges) {
+
+				final int currentIndex = addNewTerminalView(bridge);
+
+				// check to see if this bridge was requested
+				if (bridge == requestedBridge)
+					requestedIndex = currentIndex;
+			}
+
+			setDisplayedTerminal(requestedIndex);
+		}
+
+		public void onServiceDisconnected(ComponentName className) {
+			// tell each bridge to forget about our prompt handler
+			synchronized (bound.bridges) {
+				for (TerminalBridge bridge : bound.bridges)
+					bridge.promptHelper.setHandler(null);
+			}
+
+			flip.removeAllViews();
+			updateEmptyVisible();
+			bound = null;
+		}
+	};
+
+	protected Handler promptHandler = new Handler() {
+		@Override
+		public void handleMessage(Message msg) {
+			// someone below us requested to display a prompt
+			updatePromptVisible();
+		}
+	};
+
+	protected Handler disconnectHandler = new Handler() {
+		@Override
+		public void handleMessage(Message msg) {
+			Log.d(TAG, "Someone sending HANDLE_DISCONNECT to parentHandler");
+
+			// someone below us requested to display a password dialog
+			// they are sending nickname and requested
+			TerminalBridge bridge = (TerminalBridge) msg.obj;
+
+			if (bridge.isAwaitingClose())
+				closeBridge(bridge);
+		}
+	};
+
+	/**
+	 * @param bridge
 	 */
-    private void configureOrientation() {
-        String rotateDefault;
-        if (getResources().getConfiguration().keyboard == Configuration.KEYBOARD_NOKEYS)
-            rotateDefault = PreferenceConstants.ROTATION_PORTRAIT;
-        else
-            rotateDefault = PreferenceConstants.ROTATION_LANDSCAPE;
+	private void closeBridge(final TerminalBridge bridge) {
+		synchronized (flip) {
+			final int flipIndex = getFlipIndex(bridge);
 
-        String rotate = prefs.getString(PreferenceConstants.ROTATION, rotateDefault);
-        if (PreferenceConstants.ROTATION_DEFAULT.equals(rotate))
-            rotate = rotateDefault;
+			if (flipIndex >= 0) {
+				if (flip.getDisplayedChild() == flipIndex) {
+					shiftCurrentTerminal(SHIFT_LEFT);
+				}
+				flip.removeViewAt(flipIndex);
 
-        // request a forced orientation if requested by user
-        if (PreferenceConstants.ROTATION_LANDSCAPE.equals(rotate)) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            forcedOrientation = true;
-        } else if (PreferenceConstants.ROTATION_PORTRAIT.equals(rotate)) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            forcedOrientation = true;
-        } else {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-            forcedOrientation = false;
-        }
-    }
+				/*
+				 * TODO Remove this workaround when ViewFlipper is fixed to listen to view removals.
+				 * Android Issue 1784
+				 */
+				final int numChildren = flip.getChildCount();
+				if (flip.getDisplayedChild() >= numChildren && numChildren > 0) {
+					flip.setDisplayedChild(numChildren - 1);
+				}
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        super.onCreateOptionsMenu(menu);
+				updateEmptyVisible();
+			}
 
-        View view = findCurrentView(R.id.console_flip);
-        final TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
-        final boolean activeTerminal = (view instanceof TerminalView);
-        boolean sessionOpen = false;
-        boolean disconnected = false;
-        boolean canForwardPorts = false;
+			// If we just closed the last bridge, go back to the previous activity.
+			if (flip.getChildCount() == 0) {
+				finish();
+			}
+		}
+	}
 
-        if (activeTerminal) {
-            TerminalBridge bridge = ((TerminalView) view).bridge;
-            sessionOpen = bridge.isSessionOpen();
-            disconnected = bridge.isDisconnected();
-            canForwardPorts = bridge.canFowardPorts();
-        }
+	protected View findCurrentView(int id) {
+		View view = flip.getCurrentView();
+		if (view == null)
+			return null;
+		return view.findViewById(id);
+	}
 
-        menu.setQwertyMode(true);
+	protected PromptHelper getCurrentPromptHelper() {
+		View view = findCurrentView(R.id.console_flip);
+		if (!(view instanceof TerminalView))
+			return null;
+		return ((TerminalView) view).bridge.promptHelper;
+	}
 
-        disconnect = menu.add(R.string.list_host_disconnect);
-        if (hardKeyboard)
-            disconnect.setAlphabeticShortcut('w');
-        if (!sessionOpen && disconnected)
-            disconnect.setTitle(R.string.console_menu_close);
-        disconnect.setEnabled(activeTerminal);
-        disconnect.setIcon(android.R.drawable.ic_menu_close_clear_cancel);
-        disconnect.setOnMenuItemClickListener(new OnMenuItemClickListener() {
-            public boolean onMenuItemClick(MenuItem item) {
-                // disconnect or close the currently visible session
-                TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
-                TerminalBridge bridge = terminalView.bridge;
+	protected void hideAllPrompts() {
+		stringPromptGroup.setVisibility(View.GONE);
+		booleanPromptGroup.setVisibility(View.GONE);
+		// adjust screen size if it was changed during prompt input
+		View view = findCurrentView(R.id.console_flip);
+		if (!(view instanceof TerminalView))
+			return;
+		((TerminalView) view).bridge.parentChanged((TerminalView) view);
+	}
 
-                bridge.dispatchDisconnect(true);
-                return true;
-            }
-        });
+	// more like configureLaxMode -- enable network IO on UI thread
+	private void configureStrictMode() {
+		try {
+			Class.forName("android.os.StrictMode");
+			StrictModeSetup.run();
+		} catch (ClassNotFoundException e) {
+		}
+	}
 
-        copy = menu.add(R.string.console_menu_copy);
-        if (hardKeyboard)
-            copy.setAlphabeticShortcut('c');
-        copy.setIcon(android.R.drawable.ic_menu_set_as);
-        copy.setEnabled(activeTerminal);
-        copy.setOnMenuItemClickListener(new OnMenuItemClickListener() {
-            public boolean onMenuItemClick(MenuItem item) {
-                // mark as copying and reset any previous bounds
-                TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
-                copySource = terminalView.bridge;
+	@Override
+	public void onCreate(Bundle icicle) {
+		super.onCreate(icicle);
+		configureStrictMode();
+		hardKeyboard = getResources().getConfiguration().keyboard == Configuration.KEYBOARD_QWERTY;
 
-                SelectionArea area = copySource.getSelectionArea();
-                area.reset();
-                area.setBounds(copySource.buffer.getColumns(), copySource.buffer.getRows());
-                area.setRow(copySource.buffer.getCursorRow());
-                area.setColumn(copySource.buffer.getCursorColumn());
+		hardKeyboard = hardKeyboard && !Build.MODEL.startsWith("Transformer");
 
-                copySource.setSelectingForCopy(true);
+		this.setContentView(R.layout.act_console);
+		BugSenseHandler.setup(this, "d27a12dc");
+		ExceptionHandler.register(this);
 
-                // Make sure we show the initial selection
-                copySource.redraw();
+		clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+		prefs = PreferenceManager.getDefaultSharedPreferences(this);
 
-                Toast.makeText(ConsoleActivity.this, getString(R.string.console_copy_start),
-                        Toast.LENGTH_LONG).show();
-                return true;
-            }
-        });
+		// hide action bar if requested by user
+		try {
+			ActionBar actionBar = getActionBar();
+			if (!prefs.getBoolean(PreferenceConstants.ACTIONBAR, true)) {
+				actionBar.hide();
+			}
+		} catch (NoSuchMethodError error) {
+			Log.w(TAG, "Android sdk version pre 11.	Not touching ActionBar.");
+		}
 
-        paste = menu.add(R.string.console_menu_paste);
-        if (hardKeyboard)
-            paste.setAlphabeticShortcut('v');
-        paste.setIcon(android.R.drawable.ic_menu_edit);
-        paste.setEnabled(clipboard.hasText() && sessionOpen);
-        paste.setOnMenuItemClickListener(new OnMenuItemClickListener() {
-            public boolean onMenuItemClick(MenuItem item) {
-                // force insert of clipboard text into current console
-                TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
-                TerminalBridge bridge = terminalView.bridge;
+		// hide status bar if requested by user
+		if (prefs.getBoolean(PreferenceConstants.FULLSCREEN, false)) {
+			getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+					WindowManager.LayoutParams.FLAG_FULLSCREEN);
+		}
 
-                // pull string from clipboard and generate all events to force
-                // down
-                String clip = clipboard.getText().toString();
-                bridge.injectString(clip);
+		// TODO find proper way to disable volume key beep if it exists.
+		setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
-                return true;
-            }
-        });
+		// handle requested console from incoming intent
+		requested = getIntent().getData();
 
-        portForward = menu.add(R.string.console_menu_portforwards);
-        if (hardKeyboard)
-            portForward.setAlphabeticShortcut('f');
-        portForward.setIcon(android.R.drawable.ic_menu_manage);
-        portForward.setEnabled(sessionOpen && canForwardPorts);
-        portForward.setOnMenuItemClickListener(new OnMenuItemClickListener() {
-            public boolean onMenuItemClick(MenuItem item) {
-                TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
-                TerminalBridge bridge = terminalView.bridge;
+		inflater = LayoutInflater.from(this);
 
-                Intent intent = new Intent(ConsoleActivity.this, PortForwardListActivity.class);
-                intent.putExtra(Intent.EXTRA_TITLE, bridge.host.getId());
-                ConsoleActivity.this.startActivityForResult(intent, REQUEST_EDIT);
-                return true;
-            }
-        });
+		flip = (ViewFlipper) findViewById(R.id.console_flip);
+		empty = (TextView) findViewById(android.R.id.empty);
 
-        urlscan = menu.add(R.string.console_menu_urlscan);
-        if (hardKeyboard)
-            urlscan.setAlphabeticShortcut('u');
-        urlscan.setIcon(android.R.drawable.ic_menu_search);
-        urlscan.setEnabled(activeTerminal);
-        urlscan.setOnMenuItemClickListener(new OnMenuItemClickListener() {
-            public boolean onMenuItemClick(MenuItem item) {
-                final TerminalView terminal = (TerminalView) findCurrentView(R.id.console_flip);
+		stringPromptGroup = (RelativeLayout) findViewById(R.id.console_password_group);
+		stringPromptInstructions = (TextView) findViewById(R.id.console_password_instructions);
+		stringPrompt = (EditText) findViewById(R.id.console_password);
+		stringPrompt.setOnKeyListener(new OnKeyListener() {
+			public boolean onKey(View v, int keyCode, KeyEvent event) {
+				if (event.getAction() == KeyEvent.ACTION_UP)
+					return false;
+				if (keyCode != KeyEvent.KEYCODE_ENTER)
+					return false;
 
-                TerminalKeyListener handler = terminal.bridge.getKeyHandler();
-                handler.urlScan(terminal);
+				// pass collected password down to current terminal
+				String value = stringPrompt.getText().toString();
 
-                return true;
-            }
-        });
+				PromptHelper helper = getCurrentPromptHelper();
+				if (helper == null)
+					return false;
+				helper.setResponse(value);
 
-        resize = menu.add(R.string.console_menu_resize);
-        if (hardKeyboard)
-            resize.setAlphabeticShortcut('s');
-        resize.setIcon(android.R.drawable.ic_menu_crop);
-        resize.setEnabled(sessionOpen);
-        resize.setOnMenuItemClickListener(new OnMenuItemClickListener() {
-            public boolean onMenuItemClick(MenuItem item) {
-                final TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
+				// finally clear password for next user
+				stringPrompt.setText("");
+				updatePromptVisible();
 
-                final View resizeView = inflater.inflate(R.layout.dia_resize, null, false);
-                ((EditText) resizeView.findViewById(R.id.width)).setText(prefs.getString(
-                        "default_fsize_width", "80"));
-                ((EditText) resizeView.findViewById(R.id.height)).setText(prefs.getString(
-                        "default_fsize_height", "25"));
+				return true;
+			}
+		});
 
-                new AlertDialog.Builder(ConsoleActivity.this)
-                        .setView(resizeView)
-                        .setPositiveButton(R.string.button_resize,
-                                new DialogInterface.OnClickListener() {
-                                    public void onClick(DialogInterface dialog, int which) {
-                                        int width, height;
-                                        try {
-                                            width = Integer.parseInt(((EditText) resizeView
-                                                    .findViewById(R.id.width)).getText().toString());
-                                            height = Integer.parseInt(((EditText) resizeView
-                                                    .findViewById(R.id.height)).getText()
-                                                    .toString());
-                                        } catch (NumberFormatException nfe) {
-                                            // TODO change this to a real dialog where we can
-                                            // make the input boxes turn red to indicate an error.
-                                            return;
-                                        }
-                                        if (width > 0 && height > 0) {
-                                            terminalView.forceSize(width, height);
-                                            terminalView.bridge.parentChanged(terminalView);
-                                        } else {
-                                            new AlertDialog.Builder(ConsoleActivity.this)
-                                                    .setMessage(
-                                                            "Width and height must be higher than zero.")
-                                                    .setTitle("Error").show();
-                                        }
-                                    }
-                                }).setNegativeButton(android.R.string.cancel, null).create().show();
+		booleanPromptGroup = (RelativeLayout) findViewById(R.id.console_boolean_group);
+		booleanPrompt = (TextView) findViewById(R.id.console_prompt);
 
-                return true;
-            }
-        });
+		booleanYes = (Button) findViewById(R.id.console_prompt_yes);
+		booleanYes.setOnClickListener(new OnClickListener() {
+			public void onClick(View v) {
+				PromptHelper helper = getCurrentPromptHelper();
+				if (helper == null)
+					return;
+				helper.setResponse(Boolean.TRUE);
+				updatePromptVisible();
+			}
+		});
 
-        MenuItem keys = menu.add(R.string.console_menu_pubkeys);
-        keys.setIcon(android.R.drawable.ic_lock_lock);
-        keys.setIntent(new Intent(this, PubkeyListActivity.class));
-        keys.setEnabled(activeTerminal);
-        keys.setOnMenuItemClickListener(new OnMenuItemClickListener() {
-            public boolean onMenuItemClick(MenuItem item) {
-                Intent intent = new Intent(ConsoleActivity.this, PubkeyListActivity.class);
-                intent.putExtra(PubkeyListActivity.PICK_MODE, true);
-                ConsoleActivity.this.startActivityForResult(intent, REQUEST_SELECT);
-                return true;
-            }
-        });
+		booleanNo = (Button) findViewById(R.id.console_prompt_no);
+		booleanNo.setOnClickListener(new OnClickListener() {
+			public void onClick(View v) {
+				PromptHelper helper = getCurrentPromptHelper();
+				if (helper == null)
+					return;
+				helper.setResponse(Boolean.FALSE);
+				updatePromptVisible();
+			}
+		});
 
-        return true;
-    }
+		// preload animations for terminal switching
+		slide_left_in = AnimationUtils.loadAnimation(this, R.anim.slide_left_in);
+		slide_left_out = AnimationUtils.loadAnimation(this, R.anim.slide_left_out);
+		slide_right_in = AnimationUtils.loadAnimation(this, R.anim.slide_right_in);
+		slide_right_out = AnimationUtils.loadAnimation(this, R.anim.slide_right_out);
 
-    @Override
-    public boolean onPrepareOptionsMenu(Menu menu) {
-        super.onPrepareOptionsMenu(menu);
+		fade_out_delayed = AnimationUtils.loadAnimation(this, R.anim.fade_out_delayed);
+		fade_stay_hidden = AnimationUtils.loadAnimation(this, R.anim.fade_stay_hidden);
 
-        setVolumeControlStream(AudioManager.STREAM_NOTIFICATION);
+		// Preload animation for keyboard button
+		keyboard_fade_in = AnimationUtils.loadAnimation(this, R.anim.keyboard_fade_in);
+		keyboard_fade_out = AnimationUtils.loadAnimation(this, R.anim.keyboard_fade_out);
 
-        final View view = findCurrentView(R.id.console_flip);
-        boolean activeTerminal = (view instanceof TerminalView);
-        boolean sessionOpen = false;
-        boolean disconnected = false;
-        boolean canForwardPorts = false;
+		inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
 
-        if (activeTerminal) {
-            TerminalBridge bridge = ((TerminalView) view).bridge;
-            sessionOpen = bridge.isSessionOpen();
-            disconnected = bridge.isDisconnected();
-            canForwardPorts = bridge.canFowardPorts();
-        }
+		final RelativeLayout keyboardGroup = (RelativeLayout) findViewById(R.id.keyboard_group);
 
-        disconnect.setEnabled(activeTerminal);
-        if (sessionOpen || !disconnected)
-            disconnect.setTitle(R.string.list_host_disconnect);
-        else
-            disconnect.setTitle(R.string.console_menu_close);
-        copy.setEnabled(activeTerminal);
-        paste.setEnabled(clipboard.hasText() && sessionOpen);
-        portForward.setEnabled(sessionOpen && canForwardPorts);
-        urlscan.setEnabled(activeTerminal);
-        resize.setEnabled(sessionOpen);
+		mKeyboardButton = (ImageView) findViewById(R.id.button_keyboard);
+		mKeyboardButton.setOnClickListener(new OnClickListener() {
+			public void onClick(View view) {
+				View flip = findCurrentView(R.id.console_flip);
+				if (flip == null)
+					return;
 
-        return true;
-    }
+				inputManager.showSoftInput(flip, InputMethodManager.SHOW_FORCED);
+				keyboardGroup.setVisibility(View.GONE);
+			}
+		});
 
-    @Override
-    public void onOptionsMenuClosed(Menu menu) {
-        super.onOptionsMenuClosed(menu);
+		final ImageView symButton = (ImageView) findViewById(R.id.button_sym);
+		symButton.setOnClickListener(new OnClickListener() {
+			public void onClick(View view) {
+				View flip = findCurrentView(R.id.console_flip);
+				if (flip == null)
+					return;
 
-        setVolumeControlStream(AudioManager.STREAM_MUSIC);
-    }
+				TerminalView terminal = (TerminalView) flip;
 
-    @Override
-    public void onStart() {
-        super.onStart();
+				TerminalKeyListener handler = terminal.bridge.getKeyHandler();
+				handler.showCharPickerDialog(terminal);
+				keyboardGroup.setVisibility(View.GONE);
+			}
+		});
 
-        // connect with manager service to find all bridges
-        // when connected it will insert all views
-        bindService(new Intent(this, TerminalManager.class), connection, Context.BIND_AUTO_CREATE);
-    }
+		mInputButton = (ImageView) findViewById(R.id.button_input);
+		mInputButton.setOnClickListener(new OnClickListener() {
+			public void onClick(View view) {
+				View flip = findCurrentView(R.id.console_flip);
+				if (flip == null)
+					return;
 
-    @Override
-    public void onPause() {
-        super.onPause();
-        Log.d(TAG, "onPause called");
+				final TerminalView terminal = (TerminalView) flip;
+				Thread promptThread = new Thread(new Runnable() {
+					public void run() {
+						String inj = getCurrentPromptHelper().requestStringPrompt(null, "");
+						terminal.bridge.injectString(inj);
+					}
+				});
+				promptThread.setName("Prompt");
+				promptThread.setDaemon(true);
+				promptThread.start();
 
-        if (forcedOrientation && bound != null)
-            bound.setResizeAllowed(false);
-    }
+				keyboardGroup.setVisibility(View.GONE);
+			}
+		});
 
-    @Override
-    public void onResume() {
-        super.onResume();
-        Log.d(TAG, "onResume called");
+		final ImageView ctrlButton = (ImageView) findViewById(R.id.button_ctrl);
+		ctrlButton.setOnClickListener(new OnClickListener() {
+			public void onClick(View view) {
+				View flip = findCurrentView(R.id.console_flip);
+				if (flip == null)
+					return;
+				TerminalView terminal = (TerminalView) flip;
 
-        // Make sure we don't let the screen fall asleep.
-        // This also keeps the Wi-Fi chipset from disconnecting us.
-        if (prefs.getBoolean(PreferenceConstants.KEEP_ALIVE, true)) {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        } else {
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        }
+				TerminalKeyListener handler = terminal.bridge.getKeyHandler();
+				handler.metaPress(TerminalKeyListener.META_CTRL_ON);
+				terminal.bridge.tryKeyVibrate();
 
-        configureOrientation();
+				keyboardGroup.setVisibility(View.GONE);
+			}
+		});
 
-        if (forcedOrientation && bound != null)
-            bound.setResizeAllowed(true);
-    }
+		final ImageView escButton = (ImageView) findViewById(R.id.button_esc);
+		escButton.setOnClickListener(new OnClickListener() {
+			public void onClick(View view) {
+				View flip = findCurrentView(R.id.console_flip);
+				if (flip == null)
+					return;
+				TerminalView terminal = (TerminalView) flip;
 
-    /*
-     * (non-Javadoc)
+				TerminalKeyListener handler = terminal.bridge.getKeyHandler();
+				handler.sendEscape();
+				terminal.bridge.tryKeyVibrate();
+				keyboardGroup.setVisibility(View.GONE);
+			}
+		});
+
+		// detect fling gestures to switch between terminals
+		final GestureDetector detect = new GestureDetector(new ICBSimpleOnGestureListener(this));
+
+		flip.setLongClickable(true);
+		flip.setOnTouchListener(new ICBOnTouchListener(this, keyboardGroup, detect));
+
+	}
+
+	/**
      *
-     * @see android.app.Activity#onNewIntent(android.content.Intent)
      */
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
+	private void configureOrientation() {
+		String rotateDefault;
+		if (getResources().getConfiguration().keyboard == Configuration.KEYBOARD_NOKEYS)
+			rotateDefault = PreferenceConstants.ROTATION_PORTRAIT;
+		else
+			rotateDefault = PreferenceConstants.ROTATION_LANDSCAPE;
 
-        Log.d(TAG, "onNewIntent called");
+		String rotate = prefs.getString(PreferenceConstants.ROTATION, rotateDefault);
+		if (PreferenceConstants.ROTATION_DEFAULT.equals(rotate))
+			rotate = rotateDefault;
 
-        requested = intent.getData();
+		// request a forced orientation if requested by user
+		if (PreferenceConstants.ROTATION_LANDSCAPE.equals(rotate)) {
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+			forcedOrientation = true;
+		} else if (PreferenceConstants.ROTATION_PORTRAIT.equals(rotate)) {
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+			forcedOrientation = true;
+		} else {
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+			forcedOrientation = false;
+		}
+	}
 
-        if (requested == null) {
-            Log.e(TAG, "Got null intent data in onNewIntent()");
-            return;
-        }
+	@Override
+	public boolean onCreateOptionsMenu(Menu menu) {
+		super.onCreateOptionsMenu(menu);
 
-        if (bound == null) {
-            Log.e(TAG, "We're not bound in onNewIntent()");
-            return;
-        }
+		View view = findCurrentView(R.id.console_flip);
+		final TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
+		final boolean activeTerminal = (view instanceof TerminalView);
+		boolean sessionOpen = false;
+		boolean disconnected = false;
+		boolean canForwardPorts = false;
 
-        TerminalBridge requestedBridge = bound.getConnectedBridge(requested.getFragment());
-        int requestedIndex = 0;
+		if (activeTerminal) {
+			TerminalBridge bridge = ((TerminalView) view).bridge;
+			sessionOpen = bridge.isSessionOpen();
+			disconnected = bridge.isDisconnected();
+			canForwardPorts = bridge.canFowardPorts();
+		}
 
-        synchronized (flip) {
-            if (requestedBridge == null) {
-                // If we didn't find the requested connection, try opening it
+		menu.setQwertyMode(true);
 
-                try {
-                    Log.d(TAG,
-                            String.format(
-                                    "We couldnt find an existing bridge with URI=%s (nickname=%s), so creating one now",
-                                    requested.toString(), requested.getFragment()));
-                    requestedBridge = bound.openConnection(requested);
-                } catch (Exception e) {
-                    Log.e(TAG, "Problem while trying to create new requested bridge from URI", e);
-                    // TODO: We should display an error dialog here.
-                    return;
-                }
+		disconnect = menu.add(R.string.list_host_disconnect);
+		if (hardKeyboard)
+			disconnect.setAlphabeticShortcut('w');
+		if (!sessionOpen && disconnected)
+			disconnect.setTitle(R.string.console_menu_close);
+		disconnect.setEnabled(activeTerminal);
+		disconnect.setIcon(android.R.drawable.ic_menu_close_clear_cancel);
+		disconnect.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+			public boolean onMenuItemClick(MenuItem item) {
+				// disconnect or close the currently visible session
+				TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
+				TerminalBridge bridge = terminalView.bridge;
 
-                requestedIndex = addNewTerminalView(requestedBridge);
-            } else {
-                final int flipIndex = getFlipIndex(requestedBridge);
-                if (flipIndex > requestedIndex) {
-                    requestedIndex = flipIndex;
-                }
-            }
+				bridge.dispatchDisconnect(true);
+				return true;
+			}
+		});
 
-            setDisplayedTerminal(requestedIndex);
-        }
-    }
+		copy = menu.add(R.string.console_menu_copy);
+		if (hardKeyboard)
+			copy.setAlphabeticShortcut('c');
+		copy.setIcon(android.R.drawable.ic_menu_set_as);
+		copy.setEnabled(activeTerminal);
+		copy.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+			public boolean onMenuItemClick(MenuItem item) {
+				// mark as copying and reset any previous bounds
+				TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
+				copySource = terminalView.bridge;
 
-    @Override
-    public void onStop() {
-        super.onStop();
+				SelectionArea area = copySource.getSelectionArea();
+				area.reset();
+				area.setBounds(copySource.buffer.getColumns(), copySource.buffer.getRows());
+				area.setRow(copySource.buffer.getCursorRow());
+				area.setColumn(copySource.buffer.getCursorColumn());
 
-        unbindService(connection);
-    }
+				copySource.setSelectingForCopy(true);
 
-    protected void shiftCurrentTerminal(final int direction) {
-        if (prefs.getString("swipe", "").equals("default")) {
-            View overlay;
-            synchronized (flip) {
-                boolean shouldAnimate = flip.getChildCount() > 1;
+				// Make sure we show the initial selection
+				copySource.redraw();
 
-                // Only show animation if there is something else to go to.
-                if (shouldAnimate) {
-                    // keep current overlay from popping up again
-                    overlay = findCurrentView(R.id.terminal_overlay);
-                    if (overlay != null)
-                        overlay.startAnimation(fade_stay_hidden);
+				Toast.makeText(ConsoleActivity.this, getString(R.string.console_copy_start),
+						Toast.LENGTH_LONG).show();
+				return true;
+			}
+		});
 
-                    if (direction == SHIFT_LEFT) {
-                        flip.setInAnimation(slide_left_in);
-                        flip.setOutAnimation(slide_left_out);
-                        flip.showNext();
-                    } else if (direction == SHIFT_RIGHT) {
-                        flip.setInAnimation(slide_right_in);
-                        flip.setOutAnimation(slide_right_out);
-                        flip.showPrevious();
-                    }
-                }
+		paste = menu.add(R.string.console_menu_paste);
+		if (hardKeyboard)
+			paste.setAlphabeticShortcut('v');
+		paste.setIcon(android.R.drawable.ic_menu_edit);
+		paste.setEnabled(clipboard.hasText() && sessionOpen);
+		paste.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+			public boolean onMenuItemClick(MenuItem item) {
+				// force insert of clipboard text into current console
+				TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
+				TerminalBridge bridge = terminalView.bridge;
 
-                ConsoleActivity.this.updateDefault();
+				// pull string from clipboard and generate all events to force
+				// down
+				String clip = clipboard.getText().toString();
+				bridge.injectString(clip);
 
-                if (shouldAnimate) {
-                    // show overlay on new slide and start fade
-                    overlay = findCurrentView(R.id.terminal_overlay);
-                    if (overlay != null)
-                        overlay.startAnimation(fade_out_delayed);
-                }
+				return true;
+			}
+		});
 
-                updatePromptVisible();
-            }
-        } else {
-            int keyCode = 0;
-            View flip = findCurrentView(R.id.console_flip);
-            if (flip == null)
-                return;
-            TerminalView terminal = (TerminalView) flip;
+		portForward = menu.add(R.string.console_menu_portforwards);
+		if (hardKeyboard)
+			portForward.setAlphabeticShortcut('f');
+		portForward.setIcon(android.R.drawable.ic_menu_manage);
+		portForward.setEnabled(sessionOpen && canForwardPorts);
+		portForward.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+			public boolean onMenuItemClick(MenuItem item) {
+				TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
+				TerminalBridge bridge = terminalView.bridge;
 
-            if (direction == SHIFT_LEFT) {
-                if (prefs.getString("swipe", "").equals("channel_swipe_inverted")) {
-                    keyCode = vt320.KEY_RIGHT;
-                } else {
-                    keyCode = vt320.KEY_LEFT;
-                }
-            } else if (direction == SHIFT_RIGHT) {
-                if (prefs.getString("swipe", "").equals("channel_swipe_inverted")) {
-                    keyCode = vt320.KEY_LEFT;
-                } else {
-                    keyCode = vt320.KEY_RIGHT;
-                }
-            }
+				Intent intent = new Intent(ConsoleActivity.this, PortForwardListActivity.class);
+				intent.putExtra(Intent.EXTRA_TITLE, bridge.host.getId());
+				ConsoleActivity.this.startActivityForResult(intent, REQUEST_EDIT);
+				return true;
+			}
+		});
 
-            if (keyCode == vt320.KEY_RIGHT) {
-                ((vt320) terminal.bridge.buffer).write(0x0E);
-            } else if (keyCode == vt320.KEY_LEFT) {
-                ((vt320) terminal.bridge.buffer).write(0x10);
-            }
-            terminal.bridge.tryKeyVibrate();
-        }
-    }
+		urlscan = menu.add(R.string.console_menu_urlscan);
+		if (hardKeyboard)
+			urlscan.setAlphabeticShortcut('u');
+		urlscan.setIcon(android.R.drawable.ic_menu_search);
+		urlscan.setEnabled(activeTerminal);
+		urlscan.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+			public boolean onMenuItemClick(MenuItem item) {
+				final TerminalView terminal = (TerminalView) findCurrentView(R.id.console_flip);
 
-    /**
-     * Save the currently shown {@link TerminalView} as the default. This is saved back down into
-     * {@link TerminalManager} where we can read it again later.
-     */
-    private void updateDefault() {
-        // update the current default terminal
-        View view = findCurrentView(R.id.console_flip);
-        if (!(view instanceof TerminalView))
-            return;
+				TerminalKeyListener handler = terminal.bridge.getKeyHandler();
+				handler.urlScan(terminal);
 
-        TerminalView terminal = (TerminalView) view;
-        if (bound == null)
-            return;
-        bound.defaultBridge = terminal.bridge;
-    }
+				return true;
+			}
+		});
 
-    protected void updateEmptyVisible() {
-        // update visibility of empty status message
-        empty.setVisibility((flip.getChildCount() == 0) ? View.VISIBLE : View.GONE);
-    }
+		resize = menu.add(R.string.console_menu_resize);
+		if (hardKeyboard)
+			resize.setAlphabeticShortcut('s');
+		resize.setIcon(android.R.drawable.ic_menu_crop);
+		resize.setEnabled(sessionOpen);
+		resize.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+			public boolean onMenuItemClick(MenuItem item) {
+				final TerminalView terminalView = (TerminalView) findCurrentView(R.id.console_flip);
 
-    /**
-     * Show any prompts requested by the currently visible {@link TerminalView}.
-     */
-    protected void updatePromptVisible() {
-        // check if our currently-visible terminalbridge is requesting any
-        // prompt services
-        View view = findCurrentView(R.id.console_flip);
+				final View resizeView = inflater.inflate(R.layout.dia_resize, null, false);
+				((EditText) resizeView.findViewById(R.id.width)).setText(prefs.getString(
+						"default_fsize_width", "80"));
+				((EditText) resizeView.findViewById(R.id.height)).setText(prefs.getString(
+						"default_fsize_height", "25"));
 
-        // Hide all the prompts in case a prompt request was canceled
-        hideAllPrompts();
+				new AlertDialog.Builder(ConsoleActivity.this)
+						.setView(resizeView)
+						.setPositiveButton(R.string.button_resize,
+								new DialogInterface.OnClickListener() {
+									public void onClick(DialogInterface dialog, int which) {
+										int width, height;
+										try {
+											width = Integer.parseInt(((EditText) resizeView
+													.findViewById(R.id.width)).getText().toString());
+											height = Integer.parseInt(((EditText) resizeView
+													.findViewById(R.id.height)).getText()
+													.toString());
+										} catch (NumberFormatException nfe) {
+											// TODO change this to a real dialog where we can
+											// make the input boxes turn red to indicate an error.
+											return;
+										}
+										if (width > 0 && height > 0) {
+											terminalView.forceSize(width, height);
+											terminalView.bridge.parentChanged(terminalView);
+										} else {
+											new AlertDialog.Builder(ConsoleActivity.this)
+													.setMessage(
+															"Width and height must be higher than zero.")
+													.setTitle("Error").show();
+										}
+									}
+								}).setNegativeButton(android.R.string.cancel, null).create().show();
 
-        if (!(view instanceof TerminalView)) {
-            // we dont have an active view, so hide any prompts
-            return;
-        }
+				return true;
+			}
+		});
 
-        PromptHelper prompt = ((TerminalView) view).bridge.promptHelper;
-        if (String.class.equals(prompt.promptRequested)) {
-            stringPromptGroup.setVisibility(View.VISIBLE);
+		MenuItem keys = menu.add(R.string.console_menu_pubkeys);
+		keys.setIcon(android.R.drawable.ic_lock_lock);
+		keys.setIntent(new Intent(this, PubkeyListActivity.class));
+		keys.setEnabled(activeTerminal);
+		keys.setOnMenuItemClickListener(new OnMenuItemClickListener() {
+			public boolean onMenuItemClick(MenuItem item) {
+				Intent intent = new Intent(ConsoleActivity.this, PubkeyListActivity.class);
+				intent.putExtra(PubkeyListActivity.PICK_MODE, true);
+				ConsoleActivity.this.startActivityForResult(intent, REQUEST_SELECT);
+				return true;
+			}
+		});
 
-            String instructions = prompt.promptInstructions;
-            boolean password = prompt.passwordRequested;
-            if (instructions != null && instructions.length() > 0) {
-                stringPromptInstructions.setVisibility(View.VISIBLE);
-                stringPromptInstructions.setText(instructions);
-            } else
-                stringPromptInstructions.setVisibility(View.GONE);
+		return true;
+	}
 
-            if (password) {
-                stringPrompt.setInputType(InputType.TYPE_CLASS_TEXT
-                        | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-                stringPrompt.setTransformationMethod(PasswordTransformationMethod.getInstance());
-            } else {
-                stringPrompt.setInputType(InputType.TYPE_CLASS_TEXT
-                        | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
-                stringPrompt.setTransformationMethod(SingleLineTransformationMethod.getInstance());
-            }
+	@Override
+	public boolean onPrepareOptionsMenu(Menu menu) {
+		super.onPrepareOptionsMenu(menu);
 
-            stringPrompt.setText("");
-            stringPrompt.setHint(prompt.promptHint);
-            stringPrompt.requestFocus();
+		setVolumeControlStream(AudioManager.STREAM_NOTIFICATION);
 
-        } else if (Boolean.class.equals(prompt.promptRequested)) {
-            booleanPromptGroup.setVisibility(View.VISIBLE);
-            booleanPrompt.setText(prompt.promptHint);
-            booleanYes.requestFocus();
+		final View view = findCurrentView(R.id.console_flip);
+		boolean activeTerminal = (view instanceof TerminalView);
+		boolean sessionOpen = false;
+		boolean disconnected = false;
+		boolean canForwardPorts = false;
 
-        } else {
-            hideAllPrompts();
-            view.requestFocus();
-        }
-    }
+		if (activeTerminal) {
+			TerminalBridge bridge = ((TerminalView) view).bridge;
+			sessionOpen = bridge.isSessionOpen();
+			disconnected = bridge.isDisconnected();
+			canForwardPorts = bridge.canFowardPorts();
+		}
 
-    @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
+		disconnect.setEnabled(activeTerminal);
+		if (sessionOpen || !disconnected)
+			disconnect.setTitle(R.string.list_host_disconnect);
+		else
+			disconnect.setTitle(R.string.console_menu_close);
+		copy.setEnabled(activeTerminal);
+		paste.setEnabled(clipboard.hasText() && sessionOpen);
+		portForward.setEnabled(sessionOpen && canForwardPorts);
+		urlscan.setEnabled(activeTerminal);
+		resize.setEnabled(sessionOpen);
 
-        Log.d(TAG, String.format(
-                "onConfigurationChanged; requestedOrientation=%d, newConfig.orientation=%d",
-                getRequestedOrientation(), newConfig.orientation));
-        if (bound != null) {
-            if (forcedOrientation
-                    && (newConfig.orientation != Configuration.ORIENTATION_LANDSCAPE && getRequestedOrientation() == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-                    || (newConfig.orientation != Configuration.ORIENTATION_PORTRAIT && getRequestedOrientation() == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT))
-                bound.setResizeAllowed(false);
-            else
-                bound.setResizeAllowed(true);
+		return true;
+	}
 
-            bound.hardKeyboardHidden = (newConfig.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_YES);
+	@Override
+	public void onOptionsMenuClosed(Menu menu) {
+		super.onOptionsMenuClosed(menu);
 
-            mKeyboardButton.setVisibility(bound.hardKeyboardHidden ? View.VISIBLE : View.GONE);
-            mInputButton.setVisibility(bound.hardKeyboardHidden ? View.VISIBLE : View.GONE);
-        }
-    }
+		setVolumeControlStream(AudioManager.STREAM_MUSIC);
+	}
 
-    /**
-     * Adds a new TerminalBridge to the current set of views in our ViewFlipper.
-     *
-     * @param bridge
-     *            TerminalBridge to add to our ViewFlipper
-     * @return the child index of the new view in the ViewFlipper
-     */
-    private int addNewTerminalView(TerminalBridge bridge) {
-        // let them know about our prompt handler services
-        bridge.promptHelper.setHandler(promptHandler);
+	@Override
+	public void onStart() {
+		super.onStart();
 
-        // inflate each terminal view
-        RelativeLayout view = (RelativeLayout) inflater
-                .inflate(R.layout.item_terminal, flip, false);
+		// connect with manager service to find all bridges
+		// when connected it will insert all views
+		bindService(new Intent(this, TerminalManager.class), connection, Context.BIND_AUTO_CREATE);
+	}
 
-        // set the terminal overlay text
-        TextView overlay = (TextView) view.findViewById(R.id.terminal_overlay);
-        overlay.setText(bridge.host.getNickname());
+	@Override
+	public void onPause() {
+		super.onPause();
+		Log.d(TAG, "onPause called");
 
-        // and add our terminal view control, using index to place behind
-        // overlay
-        TerminalView terminal = new TerminalView(ConsoleActivity.this, bridge);
-        terminal.setId(R.id.console_flip);
-        view.addView(terminal, 0);
+		if (forcedOrientation && bound != null)
+			bound.setResizeAllowed(false);
+	}
 
-        synchronized (flip) {
-            // finally attach to the flipper
-            flip.addView(view);
-            return flip.getChildCount() - 1;
-        }
-    }
+	@Override
+	public void onResume() {
+		super.onResume();
+		Log.d(TAG, "onResume called");
 
-    private int getFlipIndex(TerminalBridge bridge) {
-        synchronized (flip) {
-            final int children = flip.getChildCount();
-            for (int i = 0; i < children; i++) {
-                final View view = flip.getChildAt(i).findViewById(R.id.console_flip);
+		// Make sure we don't let the screen fall asleep.
+		// This also keeps the Wi-Fi chipset from disconnecting us.
+		if (prefs.getBoolean(PreferenceConstants.KEEP_ALIVE, true)) {
+			getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		} else {
+			getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		}
 
-                if (view == null || !(view instanceof TerminalView)) {
-                    // How did that happen?
-                    continue;
-                }
+		configureOrientation();
 
-                final TerminalView tv = (TerminalView) view;
+		if (forcedOrientation && bound != null)
+			bound.setResizeAllowed(true);
+	}
 
-                if (tv.bridge == bridge) {
-                    return i;
-                }
-            }
-        }
+	/*
+	 * (non-Javadoc)
+	 *
+	 * @see android.app.Activity#onNewIntent(android.content.Intent)
+	 */
+	@Override
+	protected void onNewIntent(Intent intent) {
+		super.onNewIntent(intent);
 
-        return -1;
-    }
+		Log.d(TAG, "onNewIntent called");
 
-    /**
-     * Displays the child in the ViewFlipper at the requestedIndex and updates the prompts.
-     *
-     * @param requestedIndex
-     *            the index of the terminal view to display
-     */
-    private void setDisplayedTerminal(int requestedIndex) {
-        synchronized (flip) {
-            try {
-                // show the requested bridge if found, also fade out overlay
-                flip.setDisplayedChild(requestedIndex);
-                flip.getCurrentView().findViewById(R.id.terminal_overlay)
-                        .startAnimation(fade_out_delayed);
-            } catch (NullPointerException npe) {
-                Log.d(TAG, "View went away when we were about to display it", npe);
-            }
+		requested = intent.getData();
 
-            updatePromptVisible();
-            updateEmptyVisible();
-        }
-    }
+		if (requested == null) {
+			Log.e(TAG, "Got null intent data in onNewIntent()");
+			return;
+		}
 
-    /*
-     * (non-Javadoc)
-     *
-     * @see android.app.Activity#onActivityResult(int, int, android.content.Intent)
-     */
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        switch (requestCode) {
-        case REQUEST_SELECT:
-            if (resultCode == Activity.RESULT_OK) {
-                long pubkeyId = data.getLongExtra( PubkeyListActivity.PICKED_PUBKEY_ID, -1 );
-                PubkeyDatabase pubkeyDatabase = new PubkeyDatabase(this);
-                PubkeyBean pubkey = pubkeyDatabase.findPubkeyById(pubkeyId);
-                setupPublicKey( pubkey );
-            }
-            break;
-        default:
-            super.onActivityResult(requestCode, resultCode, data);
-            break;
+		if (bound == null) {
+			Log.e(TAG, "We're not bound in onNewIntent()");
+			return;
+		}
 
-        }
-    }
+		TerminalBridge requestedBridge = bound.getConnectedBridge(requested.getFragment());
+		int requestedIndex = 0;
 
-    /**
-     * @param pubkey
-     */
-    private void setupPublicKey(PubkeyBean pubkey) {
-        Log.d(TAG, "setupPublicKey, pubKey="+pubkey.getNickname() );
+		synchronized (flip) {
+			if (requestedBridge == null) {
+				// If we didn't find the requested connection, try opening it
 
-        try {
-            PublicKey pk = PubkeyUtils.decodePublic(pubkey.getPublicKey(), pubkey.getType());
-            String openSSHPubkey = PubkeyUtils.convertToOpenSSHFormat(pk, pubkey.getNickname());
+				try {
+					Log.d(TAG,
+							String.format(
+									"We couldnt find an existing bridge with URI=%s (nickname=%s), so creating one now",
+									requested.toString(), requested.getFragment()));
+					requestedBridge = bound.openConnection(requested);
+				} catch (Exception e) {
+					Log.e(TAG, "Problem while trying to create new requested bridge from URI", e);
+					// TODO: We should display an error dialog here.
+					return;
+				}
 
-            final TerminalView terminal = (TerminalView) findCurrentView(R.id.console_flip);
-            terminal.bridge.injectString("echo "+openSSHPubkey+" >> ~/.ssh/authorized_keys" );
-        } catch (InvalidKeyException e) {
-            Log.e(TAG, e.getMessage(), e );
-        } catch (NoSuchAlgorithmException e) {
-            Log.e(TAG, e.getMessage(), e );
-        } catch (InvalidKeySpecException e) {
-            Log.e(TAG, e.getMessage(), e );
-        } catch (IOException e) {
-            Log.e(TAG, e.getMessage(), e );
-        }
+				requestedIndex = addNewTerminalView(requestedBridge);
+			} else {
+				final int flipIndex = getFlipIndex(requestedBridge);
+				if (flipIndex > requestedIndex) {
+					requestedIndex = flipIndex;
+				}
+			}
 
-    }
+			setDisplayedTerminal(requestedIndex);
+		}
+	}
+
+	@Override
+	public void onStop() {
+		super.onStop();
+
+		unbindService(connection);
+	}
+
+	protected void shiftCurrentTerminal(final int direction) {
+		if (prefs.getString("swipe", "").equals("default")) {
+			View overlay;
+			synchronized (flip) {
+				boolean shouldAnimate = flip.getChildCount() > 1;
+
+				// Only show animation if there is something else to go to.
+				if (shouldAnimate) {
+					// keep current overlay from popping up again
+					overlay = findCurrentView(R.id.terminal_overlay);
+					if (overlay != null)
+						overlay.startAnimation(fade_stay_hidden);
+
+					if (direction == SHIFT_LEFT) {
+						flip.setInAnimation(slide_left_in);
+						flip.setOutAnimation(slide_left_out);
+						flip.showNext();
+					} else if (direction == SHIFT_RIGHT) {
+						flip.setInAnimation(slide_right_in);
+						flip.setOutAnimation(slide_right_out);
+						flip.showPrevious();
+					}
+				}
+
+				ConsoleActivity.this.updateDefault();
+
+				if (shouldAnimate) {
+					// show overlay on new slide and start fade
+					overlay = findCurrentView(R.id.terminal_overlay);
+					if (overlay != null)
+						overlay.startAnimation(fade_out_delayed);
+				}
+
+				updatePromptVisible();
+			}
+		} else {
+			int keyCode = 0;
+			View flip = findCurrentView(R.id.console_flip);
+			if (flip == null)
+				return;
+			TerminalView terminal = (TerminalView) flip;
+
+			if (direction == SHIFT_LEFT) {
+				if (prefs.getString("swipe", "").equals("channel_swipe_inverted")) {
+					keyCode = vt320.KEY_RIGHT;
+				} else {
+					keyCode = vt320.KEY_LEFT;
+				}
+			} else if (direction == SHIFT_RIGHT) {
+				if (prefs.getString("swipe", "").equals("channel_swipe_inverted")) {
+					keyCode = vt320.KEY_LEFT;
+				} else {
+					keyCode = vt320.KEY_RIGHT;
+				}
+			}
+
+			if (keyCode == vt320.KEY_RIGHT) {
+				((vt320) terminal.bridge.buffer).write(0x0E);
+			} else if (keyCode == vt320.KEY_LEFT) {
+				((vt320) terminal.bridge.buffer).write(0x10);
+			}
+			terminal.bridge.tryKeyVibrate();
+		}
+	}
+
+	/**
+	 * Save the currently shown {@link TerminalView} as the default. This is saved back down into
+	 * {@link TerminalManager} where we can read it again later.
+	 */
+	private void updateDefault() {
+		// update the current default terminal
+		View view = findCurrentView(R.id.console_flip);
+		if (!(view instanceof TerminalView))
+			return;
+
+		TerminalView terminal = (TerminalView) view;
+		if (bound == null)
+			return;
+		bound.defaultBridge = terminal.bridge;
+	}
+
+	protected void updateEmptyVisible() {
+		// update visibility of empty status message
+		empty.setVisibility((flip.getChildCount() == 0) ? View.VISIBLE : View.GONE);
+	}
+
+	/**
+	 * Show any prompts requested by the currently visible {@link TerminalView}.
+	 */
+	protected void updatePromptVisible() {
+		// check if our currently-visible terminalbridge is requesting any
+		// prompt services
+		View view = findCurrentView(R.id.console_flip);
+
+		// Hide all the prompts in case a prompt request was canceled
+		hideAllPrompts();
+
+		if (!(view instanceof TerminalView)) {
+			// we dont have an active view, so hide any prompts
+			return;
+		}
+
+		PromptHelper prompt = ((TerminalView) view).bridge.promptHelper;
+		if (String.class.equals(prompt.promptRequested)) {
+			stringPromptGroup.setVisibility(View.VISIBLE);
+
+			String instructions = prompt.promptInstructions;
+			boolean password = prompt.passwordRequested;
+			if (instructions != null && instructions.length() > 0) {
+				stringPromptInstructions.setVisibility(View.VISIBLE);
+				stringPromptInstructions.setText(instructions);
+			} else
+				stringPromptInstructions.setVisibility(View.GONE);
+
+			if (password) {
+				stringPrompt.setInputType(InputType.TYPE_CLASS_TEXT
+						| InputType.TYPE_TEXT_VARIATION_PASSWORD);
+				stringPrompt.setTransformationMethod(PasswordTransformationMethod.getInstance());
+			} else {
+				stringPrompt.setInputType(InputType.TYPE_CLASS_TEXT
+						| InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
+				stringPrompt.setTransformationMethod(SingleLineTransformationMethod.getInstance());
+			}
+
+			stringPrompt.setText("");
+			stringPrompt.setHint(prompt.promptHint);
+			stringPrompt.requestFocus();
+
+		} else if (Boolean.class.equals(prompt.promptRequested)) {
+			booleanPromptGroup.setVisibility(View.VISIBLE);
+			booleanPrompt.setText(prompt.promptHint);
+			booleanYes.requestFocus();
+
+		} else {
+			hideAllPrompts();
+			view.requestFocus();
+		}
+	}
+
+	@Override
+	public void onConfigurationChanged(Configuration newConfig) {
+		super.onConfigurationChanged(newConfig);
+
+		Log.d(TAG, String.format(
+				"onConfigurationChanged; requestedOrientation=%d, newConfig.orientation=%d",
+				getRequestedOrientation(), newConfig.orientation));
+		if (bound != null) {
+			if (forcedOrientation
+					&& (newConfig.orientation != Configuration.ORIENTATION_LANDSCAPE && getRequestedOrientation() == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+					|| (newConfig.orientation != Configuration.ORIENTATION_PORTRAIT && getRequestedOrientation() == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT))
+				bound.setResizeAllowed(false);
+			else
+				bound.setResizeAllowed(true);
+
+			bound.hardKeyboardHidden = (newConfig.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_YES);
+
+			mKeyboardButton.setVisibility(bound.hardKeyboardHidden ? View.VISIBLE : View.GONE);
+			mInputButton.setVisibility(bound.hardKeyboardHidden ? View.VISIBLE : View.GONE);
+		}
+	}
+
+	/**
+	 * Adds a new TerminalBridge to the current set of views in our ViewFlipper.
+	 *
+	 * @param bridge
+	 *            TerminalBridge to add to our ViewFlipper
+	 * @return the child index of the new view in the ViewFlipper
+	 */
+	private int addNewTerminalView(TerminalBridge bridge) {
+		// let them know about our prompt handler services
+		bridge.promptHelper.setHandler(promptHandler);
+
+		// inflate each terminal view
+		RelativeLayout view = (RelativeLayout) inflater
+				.inflate(R.layout.item_terminal, flip, false);
+
+		// set the terminal overlay text
+		TextView overlay = (TextView) view.findViewById(R.id.terminal_overlay);
+		overlay.setText(bridge.host.getNickname());
+
+		// and add our terminal view control, using index to place behind
+		// overlay
+		TerminalView terminal = new TerminalView(ConsoleActivity.this, bridge);
+		terminal.setId(R.id.console_flip);
+		view.addView(terminal, 0);
+
+		synchronized (flip) {
+			// finally attach to the flipper
+			flip.addView(view);
+			return flip.getChildCount() - 1;
+		}
+	}
+
+	private int getFlipIndex(TerminalBridge bridge) {
+		synchronized (flip) {
+			final int children = flip.getChildCount();
+			for (int i = 0; i < children; i++) {
+				final View view = flip.getChildAt(i).findViewById(R.id.console_flip);
+
+				if (view == null || !(view instanceof TerminalView)) {
+					// How did that happen?
+					continue;
+				}
+
+				final TerminalView tv = (TerminalView) view;
+
+				if (tv.bridge == bridge) {
+					return i;
+				}
+			}
+		}
+
+		return -1;
+	}
+
+	/**
+	 * Displays the child in the ViewFlipper at the requestedIndex and updates the prompts.
+	 *
+	 * @param requestedIndex
+	 *            the index of the terminal view to display
+	 */
+	private void setDisplayedTerminal(int requestedIndex) {
+		synchronized (flip) {
+			try {
+				// show the requested bridge if found, also fade out overlay
+				flip.setDisplayedChild(requestedIndex);
+				flip.getCurrentView().findViewById(R.id.terminal_overlay)
+						.startAnimation(fade_out_delayed);
+			} catch (NullPointerException npe) {
+				Log.d(TAG, "View went away when we were about to display it", npe);
+			}
+
+			updatePromptVisible();
+			updateEmptyVisible();
+		}
+	}
+
+	/*
+	 * (non-Javadoc)
+	 *
+	 * @see android.app.Activity#onActivityResult(int, int, android.content.Intent)
+	 */
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		switch (requestCode) {
+		case REQUEST_SELECT:
+			if (resultCode == Activity.RESULT_OK) {
+				long pubkeyId = data.getLongExtra(PubkeyListActivity.PICKED_PUBKEY_ID, -1);
+				PubkeyDatabase pubkeyDatabase = new PubkeyDatabase(this);
+				PubkeyBean pubkey = pubkeyDatabase.findPubkeyById(pubkeyId);
+				setupPublicKey(pubkey);
+			}
+			break;
+		default:
+			super.onActivityResult(requestCode, resultCode, data);
+			break;
+
+		}
+	}
+
+	/**
+	 * @param pubkey
+	 */
+	private void setupPublicKey(PubkeyBean pubkey) {
+		Log.d(TAG, "setupPublicKey, pubKey=" + pubkey.getNickname());
+
+		try {
+			PublicKey pk = PubkeyUtils.decodePublic(pubkey.getPublicKey(), pubkey.getType());
+			String openSSHPubkey = PubkeyUtils.convertToOpenSSHFormat(pk, pubkey.getNickname());
+
+			final TerminalView terminal = (TerminalView) findCurrentView(R.id.console_flip);
+			terminal.bridge.injectString("echo " + openSSHPubkey + " >> ~/.ssh/authorized_keys");
+		} catch (InvalidKeyException e) {
+			Log.e(TAG, e.getMessage(), e);
+		} catch (NoSuchAlgorithmException e) {
+			Log.e(TAG, e.getMessage(), e);
+		} catch (InvalidKeySpecException e) {
+			Log.e(TAG, e.getMessage(), e);
+		} catch (IOException e) {
+			Log.e(TAG, e.getMessage(), e);
+		}
+
+	}
 
 }
