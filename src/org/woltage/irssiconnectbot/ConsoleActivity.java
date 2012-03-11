@@ -1099,7 +1099,8 @@ public class ConsoleActivity extends Activity {
 			String openSSHPubkey = PubkeyUtils.convertToOpenSSHFormat(pk, pubkey.getNickname());
 
 			final TerminalView terminal = (TerminalView) findCurrentView(R.id.console_flip);
-			terminal.bridge.injectString("echo " + openSSHPubkey + " >> ~/.ssh/authorized_keys");
+			// Create directory, if it does not exist, with permissions 700
+			terminal.bridge.injectString("mkdir .ssh -pm 700 ; echo " + openSSHPubkey + " >> ~/.ssh/authorized_keys");
 		} catch (InvalidKeyException e) {
 			Log.e(TAG, e.getMessage(), e);
 		} catch (NoSuchAlgorithmException e) {
