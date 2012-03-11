@@ -17,12 +17,33 @@
 
 package org.woltage.irssiconnectbot;
 
-import java.io.IOException;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
-import java.security.PublicKey;
-import java.security.spec.InvalidKeySpecException;
-
+import android.app.ActionBar;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.*;
+import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
+import android.gesture.*;
+import android.media.AudioManager;
+import android.net.Uri;
+import android.os.*;
+import android.preference.PreferenceManager;
+import android.text.ClipboardManager;
+import android.text.InputType;
+import android.text.method.PasswordTransformationMethod;
+import android.text.method.SingleLineTransformationMethod;
+import android.util.Log;
+import android.view.*;
+import android.view.MenuItem.OnMenuItemClickListener;
+import android.view.View.OnClickListener;
+import android.view.View.OnKeyListener;
+import android.view.animation.Animation;
+import android.view.animation.AnimationUtils;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.*;
+import com.bugsense.trace.BugSenseHandler;
+import com.nullwire.trace.ExceptionHandler;
+import de.mud.terminal.vt320;
 import org.woltage.irssiconnectbot.bean.PubkeyBean;
 import org.woltage.irssiconnectbot.bean.SelectionArea;
 import org.woltage.irssiconnectbot.service.PromptHelper;
@@ -33,57 +54,14 @@ import org.woltage.irssiconnectbot.util.PreferenceConstants;
 import org.woltage.irssiconnectbot.util.PubkeyDatabase;
 import org.woltage.irssiconnectbot.util.PubkeyUtils;
 
-import android.app.ActionBar;
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.ComponentName;
-import android.content.Context;
-import android.content.DialogInterface;
-import android.content.Intent;
-import android.content.ServiceConnection;
-import android.content.SharedPreferences;
-import android.content.pm.ActivityInfo;
-import android.content.res.Configuration;
-import android.media.AudioManager;
-import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
-import android.os.Handler;
-import android.os.IBinder;
-import android.os.Message;
-import android.preference.PreferenceManager;
-import android.text.ClipboardManager;
-import android.text.InputType;
-import android.text.method.PasswordTransformationMethod;
-import android.text.method.SingleLineTransformationMethod;
-import android.util.Log;
-import android.view.GestureDetector;
-import android.view.KeyEvent;
-import android.view.LayoutInflater;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.MenuItem.OnMenuItemClickListener;
-import android.view.View;
-import android.view.View.OnClickListener;
-import android.view.View.OnKeyListener;
-import android.view.WindowManager;
-import android.view.animation.Animation;
-import android.view.animation.AnimationUtils;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ImageView;
-import android.widget.RelativeLayout;
-import android.widget.TextView;
-import android.widget.Toast;
-import android.widget.ViewFlipper;
+import java.io.IOException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.util.Collection;
 
-import com.bugsense.trace.BugSenseHandler;
-import com.nullwire.trace.ExceptionHandler;
-
-import de.mud.terminal.vt320;
-
-public class ConsoleActivity extends Activity {
+public class ConsoleActivity extends Activity implements GestureOverlayView.OnGesturePerformedListener {
 	public final static String TAG = "ConnectBot.ConsoleActivity";
 
 	protected static final int REQUEST_EDIT = 1;
@@ -135,6 +113,8 @@ public class ConsoleActivity extends Activity {
 
 	private ImageView mKeyboardButton;
 	private ImageView mInputButton;
+
+	private GestureLibrary gestureLibrary;
 
 	private ServiceConnection connection = new ServiceConnection() {
 		public void onServiceConnected(ComponentName className, IBinder service) {
@@ -478,6 +458,13 @@ public class ConsoleActivity extends Activity {
 		flip.setLongClickable(true);
 		flip.setOnTouchListener(new ICBOnTouchListener(this, keyboardGroup, detect));
 
+		gestureLibrary = GestureLibraries.fromRawResource(this, R.raw.gestures);
+		if (!gestureLibrary.load()) {
+			Log.w(TAG, "Cannot load gestureLibrary");
+		}
+		
+		GestureOverlayView gestures = (GestureOverlayView) findViewById(R.id.gestures);
+		gestures.addOnGesturePerformedListener(this);
 	}
 
 	/**
@@ -1113,4 +1100,19 @@ public class ConsoleActivity extends Activity {
 
 	}
 
+	public void onGesturePerformed(GestureOverlayView gestureOverlayView, Gesture gesture) {
+		Log.d(TAG, "onGesturePerformed, gesture=" + gesture);
+		Collection<Prediction> predictions = gestureLibrary.recognize(gesture);
+		
+		Prediction bestMatch = null;
+		for( Prediction prediction : predictions ) {
+			if( bestMatch == null || prediction.score > bestMatch.score ) {
+				bestMatch = prediction;
+			}
+		}
+		
+		if( bestMatch != null && bestMatch.score > 1f ) {
+			Toast.makeText(this, bestMatch.name, Toast.LENGTH_SHORT).show();
+		}
+	}
 }
